@@ -1,15 +1,19 @@
 {
   "name": "kao",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Scraper de SeriesKao con Firebase y TMDB",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "postinstall": "npx puppeteer browsers install chrome"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "dependencies": {
     "axios": "^1.20.0",
     "dotenv": "^17.4.2",
