@@ -23,6 +23,49 @@ if (!fs.existsSync(OUT_SERIES)) fs.mkdirSync(OUT_SERIES);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// === Helper para lanzar el navegador con proxy ===
+async function launchBrowser() {
+  const launchArgs = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-blink-features=AutomationControlled',
+    '--disable-dev-shm-usage'
+  ];
+
+  if (process.env.PROXY_HOST && process.env.PROXY_PORT) {
+    launchArgs.push(`--proxy-server=http://${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`);
+    console.log(`[PROXY] Usando proxy: ${process.env.PROXY_HOST}:${process.env.PROXY_PORT}`);
+  }
+
+  const browser = await puppeteer.launch({
+    headless: 'new',
+    args: launchArgs
+  });
+
+  const page = await browser.newPage();
+
+  // Autenticar el proxy si hay password
+  if (process.env.PROXY_PASSWORD) {
+    try {
+      await page.authenticate({
+        username: '',
+        password: process.env.PROXY_PASSWORD
+      });
+      console.log('[PROXY] Proxy autenticado');
+    } catch (e) {
+      console.warn('[PROXY] No se pudo autenticar:', e.message);
+    }
+  }
+
+  await page.setViewport({ width: 1920, height: 1080 });
+  await page.setUserAgent(
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
+    '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  );
+
+  return { browser, page };
+}
+
 // === Utilidades ===
 function slugFromUrl(url) {
   const m = url.match(/\/(?:pelicula|serie|anime|dorama)\/([^\/\?]+)/);
@@ -77,22 +120,22 @@ async function scrapeEpisodeServers(page, url) {
     const htmlContent = await page.content();
     console.log(`[SCRAPE] HTML length: ${htmlContent.length}`);
 
-    // === DETECTAR CLOUDFLARE ===
+    // Detectar Cloudflare
     if (detectBlock(htmlContent, title)) {
-      console.log(`[SCRAPE] BLOQUEADO por Cloudflare (ASN bloqueado)`);
+      console.log(`[SCRAPE] BLOQUEADO por Cloudflare`);
       result.error = 'cloudflare_blocked';
       result.blocked = true;
       return result;
     }
 
-    // === VERIFICAR SELECTOR ===
+    // Verificar selector
     const hasSelector = htmlContent.includes('player-box__servers');
     console.log(`[SCRAPE] Tiene player-box__servers: ${hasSelector}`);
 
     if (!hasSelector) {
       const bodyText = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 300) : '').catch(() => '');
       console.log(`[SCRAPE] Preview body: ${bodyText.replace(/\s+/g, ' ').slice(0, 200)}`);
-      console.log(`[SCRAPE] ERROR: Selector no existe en el HTML`);
+      console.log(`[SCRAPE] ERROR: Selector no existe`);
       result.error = 'selector_not_found';
       return result;
     }
@@ -202,7 +245,6 @@ async function scrapeSeries(page, url) {
     const htmlContent = await page.content();
     console.log(`[SERIES] Titulo: ${title} | HTML: ${htmlContent.length}`);
 
-    // Detectar Cloudflare
     if (detectBlock(htmlContent, title)) {
       console.log(`[SERIES] BLOQUEADO por Cloudflare`);
       result.error = 'cloudflare_blocked';
@@ -214,7 +256,6 @@ async function scrapeSeries(page, url) {
     result.description = await page.$eval('.detail-hero__desc', el => el.textContent.trim()).catch(() => null);
     console.log(`[SERIES] Titulo extraido: ${result.title}`);
 
-    // Extraer temporadas
     const seasons = await page.evaluate(() => {
       const set = new Set();
       document.querySelectorAll('a[href*="/temporada/"]').forEach(a => {
@@ -225,12 +266,11 @@ async function scrapeSeries(page, url) {
     });
 
     if (seasons.length === 0) seasons.push(1);
-    console.log(`[SERIES] Temporadas encontradas: ${seasons.join(', ')}`);
+    console.log(`[SERIES] Temporadas: ${seasons.join(', ')}`);
 
-    // Para cada temporada, extraer episodios
     for (const seasonNum of seasons) {
       const seasonUrl = url.replace(/\/$/, '') + '/temporada/' + seasonNum + '/capitulo/1';
-      console.log(`[SERIES] Navegando a temporada ${seasonNum}: ${seasonUrl}`);
+      console.log(`[SERIES] Navegando a temporada ${seasonNum}`);
       await page.goto(seasonUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
       await new Promise(r => setTimeout(r, 2000));
 
@@ -292,10 +332,10 @@ async function scrapeAllEpisodesFn(page, seriesData, onProgress) {
         ep.scrapedAt = new Date().toISOString();
 
         if (r.blocked) {
-          console.log(`[EPISODIOS] T${season.number}E${ep.number} BLOQUEADO por Cloudflare`);
+          console.log(`[EPISODIOS] T${season.number}E${ep.number} BLOQUEADO`);
           bloqueosConsecutivos++;
           if (bloqueosConsecutivos >= 3) {
-            console.log(`[EPISODIOS] 3 bloqueos consecutivos. Abortando serie.`);
+            console.log(`[EPISODIOS] 3 bloqueos consecutivos. Abortando.`);
             seriesData.aborted = true;
             break;
           }
@@ -349,22 +389,7 @@ app.post('/api/scrape', async (req, res) => {
   (async () => {
     broadcast({ type: 'start', total: urls.length });
 
-    const browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage'
-      ]
-    });
-
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+    const { browser, page } = await launchBrowser();
 
     let ok = 0, fail = 0, blocked = 0;
 
@@ -377,7 +402,6 @@ app.post('/api/scrape', async (req, res) => {
 
       try {
         if (type === 'pelicula') {
-          // === PELICULA ===
           console.log(`[MAIN] Procesando pelicula: ${slug}`);
 
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
@@ -398,7 +422,6 @@ app.post('/api/scrape', async (req, res) => {
 
           const r = await scrapeEpisodeServers(page, url);
 
-          // Buscar en TMDB
           let tmdbData = null;
           if (titulo) {
             tmdbData = await tmdb.buscarPelicula(titulo, year);
@@ -442,7 +465,6 @@ app.post('/api/scrape', async (req, res) => {
           }
 
         } else {
-          // === SERIE / ANIME / DORAMA ===
           console.log(`[MAIN] Procesando serie/anime: ${slug}`);
           const seriesData = await scrapeSeries(page, url);
 
@@ -468,7 +490,6 @@ app.post('/api/scrape', async (req, res) => {
             seriesData.vote_average = tmdbData?.vote_average || null;
             seriesData.year = tmdbData?.year || null;
 
-            // Scrapear todos los episodios si se pidio
             if (scrapeAllEpisodes) {
               const totalEps = seriesData.seasons.reduce((s, x) => s + x.episodes.length, 0);
               broadcast({ type: 'episodes-start', slug: seriesData.slug, total: totalEps });
@@ -492,7 +513,6 @@ app.post('/api/scrape', async (req, res) => {
               const saved = await fb.guardarSerie(seriesData.tmdb_id, seriesData);
               broadcast({ type: 'firebase', ok: saved, tipo: 'serie', tmdb_id: seriesData.tmdb_id });
 
-              // Guardar cada episodio con servidores
               let epGuardados = 0;
               for (const season of seriesData.seasons) {
                 for (const ep of season.episodes) {
@@ -541,22 +561,7 @@ app.post('/api/scrape-episode', async (req, res) => {
   (async () => {
     broadcast({ type: 'episode-start', slug, season, episode, url });
 
-    const browser = await puppeteer.launch({
-      headless: 'new',
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-blink-features=AutomationControlled',
-        '--disable-dev-shm-usage'
-      ]
-    });
-
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1920, height: 1080 });
-    await page.setUserAgent(
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    );
+    const { browser, page } = await launchBrowser();
 
     let epTitle = null;
     try {
@@ -567,7 +572,6 @@ app.post('/api/scrape-episode', async (req, res) => {
     const r = await scrapeEpisodeServers(page, url);
     await browser.close();
 
-    // Actualizar archivo local
     const seriesFile = path.join(OUT_SERIES, slug + '.json');
     if (fs.existsSync(seriesFile)) {
       const series = JSON.parse(fs.readFileSync(seriesFile, 'utf8'));
@@ -639,5 +643,6 @@ server.listen(PORT, () => {
   console.log(' Servidor listo en: http://localhost:' + PORT);
   console.log(' Firebase:', process.env.FIREBASE_URL || 'no configurado');
   console.log(' TMDB API Key:', process.env.TMDB_API_KEY ? 'si' : 'NO');
+  console.log(' Proxy:', process.env.PROXY_HOST ? 'si (' + process.env.PROXY_HOST + ':' + process.env.PROXY_PORT + ')' : 'NO');
   console.log('');
 });
