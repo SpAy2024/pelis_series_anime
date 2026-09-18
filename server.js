@@ -48,8 +48,8 @@ async function scrapeEpisodeServers(page, url) {
   const result = { servers: [], downloadLinks: [], error: null };
 
   try {
-    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
-    await page.waitForSelector('.player-box__servers .server-btn', { timeout: 15000 });
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await page.waitForSelector('.player-box__servers .server-btn', { timeout: 45000 });
 
     await page.mouse.move(500, 400);
     await new Promise(r => setTimeout(r, 800));
