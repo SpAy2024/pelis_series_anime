@@ -48,8 +48,28 @@ async function scrapeEpisodeServers(page, url) {
   const result = { servers: [], downloadLinks: [], error: null };
 
   try {
+    console.log(`[SCRAPE] ================== INICIO ==================`);
+    console.log(`[SCRAPE] Navegando a: ${url}`);
+
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
+
+    const pageUrl = page.url();
+    const title = await page.title().catch(() => '?');
+    console.log(`[SCRAPE] PAGINA CARGADA`);
+    console.log(`[SCRAPE] URL final: ${pageUrl}`);
+    console.log(`[SCRAPE] Titulo: ${title}`);
+
+    const bodyText = await page.evaluate(() => document.body ? document.body.innerText.slice(0, 300) : '').catch(() => '');
+    console.log(`[SCRAPE] Preview body: ${bodyText.replace(/\s+/g, ' ').slice(0, 200)}`);
+
+    const htmlContent = await page.content();
+    console.log(`[SCRAPE] HTML length: ${htmlContent.length}`);
+    console.log(`[SCRAPE] Tiene player-box__servers: ${htmlContent.includes('player-box__servers')}`);
+    console.log(`[SCRAPE] Tiene cloudflare: ${htmlContent.includes('cf-chl') || htmlContent.includes('Just a moment')}`);
+
+    console.log(`[SCRAPE] Esperando selector .player-box__servers .server-btn (45s)...`);
     await page.waitForSelector('.player-box__servers .server-btn', { timeout: 45000 });
+    console.log(`[SCRAPE] SELECTOR ENCONTRADO`);
 
     await page.mouse.move(500, 400);
     await new Promise(r => setTimeout(r, 800));
@@ -57,6 +77,7 @@ async function scrapeEpisodeServers(page, url) {
     await page.evaluate(() => window.scrollBy(0, 300));
     await new Promise(r => setTimeout(r, 1000));
 
+    console.log(`[SCRAPE] Click en Embed69...`);
     await page.click('.player-box__servers .server-btn');
     await new Promise(r => setTimeout(r, 6000));
 
@@ -64,7 +85,13 @@ async function scrapeEpisodeServers(page, url) {
     for (const frame of page.frames()) {
       if (frame.url().includes('/vidurl/')) { iframeFrame = frame; break; }
     }
-    if (!iframeFrame) { result.error = 'no iframe'; return result; }
+
+    if (!iframeFrame) {
+      console.log(`[SCRAPE] ERROR: No se encontro iframe /vidurl/`);
+      result.error = 'no iframe';
+      return result;
+    }
+    console.log(`[SCRAPE] iframe encontrado: ${iframeFrame.url()}`);
 
     let decrypted = null;
     for (let i = 0; i < 30; i++) {
@@ -79,11 +106,20 @@ async function scrapeEpisodeServers(page, url) {
           }
           return { decrypted: false };
         });
-        if (state.decrypted) { decrypted = state; break; }
-      } catch {}
+        if (state.decrypted) {
+          decrypted = state;
+          console.log(`[SCRAPE] Descifrado en ${i+1}s`);
+          break;
+        }
+        if (i % 5 === 0) console.log(`[SCRAPE] Esperando POW... ${i+1}s`);
+      } catch (e) {}
     }
 
-    if (!decrypted) { result.error = 'timeout descifrado'; return result; }
+    if (!decrypted) {
+      console.log(`[SCRAPE] ERROR: Timeout descifrado (30s)`);
+      result.error = 'timeout descifrado';
+      return result;
+    }
 
     for (const file of decrypted.dataLink) {
       if (file.sortedEmbeds) {
@@ -98,8 +134,13 @@ async function scrapeEpisodeServers(page, url) {
       }
     }
 
+    console.log(`[SCRAPE] EXITO: ${result.servers.length} servidores`);
+    console.log(`[SCRAPE] ================== FIN ==================`);
     return result;
+
   } catch (e) {
+    console.error(`[SCRAPE] ERROR: ${e.message}`);
+    console.error(`[SCRAPE] Stack: ${e.stack ? e.stack.slice(0, 500) : 'n/a'}`);
     result.error = e.message;
     return result;
   }
