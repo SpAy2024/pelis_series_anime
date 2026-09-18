@@ -1,0 +1,23 @@
+# Dependencias
+node_modules/
+
+# Variables de entorno (¡NUNCA subir esto!)
+.env
+
+# Datos locales generados
+enlaces/
+series/
+urls/
+.cache/
+iframe-content.html
+enlaces.json
+urls-state.json
+urls.txt
+
+# Logs
+*.log
+npm-debug.log*
+
+# Archivos temporales del sistema
+.DS_Store
+Thumbs.db

@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KAO Scraper</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>KAO Scraper</h1>
+    <div class="tabs">
+      <button class="tab active" data-tab="scraper">Scraper</button>
+      <button class="tab" data-tab="biblioteca">Biblioteca</button>
+    </div>
+    <span id="status" class="status">Desconectado</span>
+  </header>
+
+  <main>
+    <!-- PESTANA SCRAPER -->
+    <div class="tab-content active" id="tab-scraper">
+      <section class="card">
+        <h2>1. Ingresar URLs</h2>
+        <p class="hint">Peliculas, series, animes o doramas. Una URL por linea.</p>
+        <textarea id="urls-input" rows="8" placeholder="https://serieskao.top/pelicula/the-surfer-dqoZfz
+https://serieskao.top/serie/neagley-zz9dsG
+https://serieskao.top/anime/el-magico-libro-de-zero-J33Iqj"></textarea>
+
+        <label style="display:flex;align-items:center;gap:0.5rem;margin-top:1rem;font-size:0.85rem;cursor:pointer">
+          <input type="checkbox" id="scrape-all-episodes">
+          Scrapear TODOS los episodios de cada serie (lento)
+        </label>
+
+        <div class="actions">
+          <button id="btn-scrape" class="primary">Scrapear</button>
+          <button id="btn-clear">Limpiar</button>
+          <button id="btn-load-json">Cargar datos</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>2. Progreso</h2>
+        <div class="progress-bar"><div id="progress-fill" class="progress-fill"></div></div>
+        <div class="progress-info">
+          <span id="progress-text">Sin iniciar</span>
+          <span id="progress-stats"></span>
+        </div>
+        <ul id="log" class="log"></ul>
+      </section>
+
+      <section class="card">
+        <h2>3. Resultados</h2>
+        <div id="results" class="results"></div>
+      </section>
+    </div>
+
+    <!-- PESTANA BIBLIOTECA -->
+    <div class="tab-content" id="tab-biblioteca">
+      <section class="card">
+        <h2>Biblioteca</h2>
+        <div class="filters">
+          <input type="text" id="search-lib" placeholder="Buscar...">
+          <select id="filter-type">
+            <option value="all">Todo</option>
+            <option value="pelicula">Peliculas</option>
+            <option value="serie">Series</option>
+            <option value="anime">Animes</option>
+          </select>
+        </div>
+        <div id="library" class="results"></div>
+      </section>
+    </div>
+  </main>
+
+  <div id="player-modal" class="modal hidden">
+    <div class="modal-content">
+      <button class="modal-close" id="modal-close">X</button>
+      <h3 id="modal-title">Reproductor</h3>
+      <div class="player-wrapper">
+        <iframe id="modal-iframe" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+      </div>
+      <div id="modal-servers" class="modal-servers"></div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
