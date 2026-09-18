@@ -27,7 +27,8 @@ const scrapeAllEpisodesCheckbox = $('scrape-all-episodes');
 
 // === WebSocket ===
 function connectWS() {
-  const ws = new WebSocket('ws://' + location.host);
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(protocol + '//' + location.host);
   ws.onopen = () => { statusEl.textContent = 'Conectado'; statusEl.classList.add('connected'); };
   ws.onclose = () => {
     statusEl.textContent = 'Desconectado'; statusEl.classList.remove('connected');

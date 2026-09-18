@@ -14,7 +14,7 @@ const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 const OUT_DIR = path.join(__dirname, 'enlaces');
 const OUT_SERIES = path.join(__dirname, 'series');
 if (!fs.existsSync(OUT_DIR)) fs.mkdirSync(OUT_DIR);
