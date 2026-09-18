@@ -48,11 +48,12 @@ function handleWSMessage(msg) {
     progressFill.style.width = ((msg.index - 1) / msg.total * 100) + '%';
     progressText.textContent = 'Scrapeando ' + msg.index + '/' + msg.total + '...';
     addLog('[' + msg.index + '/' + msg.total + '] ' + msg.slug + ' (' + msg.kind + ')', '');
-  } else if (msg.type === 'result') {
+   } else if (msg.type === 'result') {
     progressFill.style.width = (msg.index / msg.total * 100) + '%';
     if (msg.ok) {
-      if (msg.result.servers) {
-        addLog('[OK] ' + (msg.result.title || msg.result.slug) + ' - ' + msg.result.servers.length + ' servidores', 'ok');
+      if (msg.result.servidores || msg.result.servers) {
+        const count = (msg.result.servidores || msg.result.servers || []).length;
+        addLog('[OK] ' + (msg.result.titulo || msg.result.title || msg.result.slug) + ' - ' + count + ' servidores', 'ok');
         allResults = allResults.filter(r => r.slug !== msg.result.slug);
         allResults.push(msg.result);
       } else if (msg.result.seasons) {
@@ -62,13 +63,22 @@ function handleWSMessage(msg) {
       }
       renderResults();
     } else {
-      addLog('[ERR] ' + (msg.result.slug || msg.result.url) + ' - ' + msg.result.error, 'err');
+      if (msg.blocked || msg.result?.error === 'cloudflare_blocked') {
+        addLog('🚫 [BLOQUEADO] ' + (msg.result.slug || msg.result.url) + ' - Cloudflare bloqueó la IP', 'err');
+        addLog('   💡 Solución: usar proxy residencial o correr el scraper en tu PC', '');
+      } else {
+        addLog('[ERR] ' + (msg.result.slug || msg.result.url) + ' - ' + msg.result.error, 'err');
+      }
     }
-  } else if (msg.type === 'done') {
+  
+    } else if (msg.type === 'done') {
     progressFill.style.width = '100%';
-    progressText.textContent = 'Completado: ' + msg.ok + ' OK, ' + msg.fail + ' errores';
-    addLog('Completado', '');
+    let text = 'Completado: ' + msg.ok + ' OK, ' + msg.fail + ' errores';
+    if (msg.blocked > 0) text += ' (' + msg.blocked + ' bloqueados por Cloudflare)';
+    progressText.textContent = text;
+    addLog(text, msg.blocked > 0 ? 'err' : '');
     btnScrape.disabled = false;
+  
   } else if (msg.type === 'episode-result') {
     addLog('[EP] S' + msg.season + 'E' + msg.episode + ' - ' + msg.servers.length + ' servidores', 'ok');
     if (currentSeries && currentSeries.slug === msg.slug) {
@@ -83,11 +93,24 @@ function handleWSMessage(msg) {
     if (msg.done % 5 === 0 || msg.done === msg.total) {
       addLog('  [EP] ' + msg.done + '/' + msg.total + ' T' + msg.season + 'E' + msg.episode, '');
     }
-  } else if (msg.type === 'episodes-done') {
-    addLog('[EPISODIOS] Completados para ' + msg.slug, 'ok');
+   } else if (msg.type === 'episodes-done') {
+    if (msg.aborted) {
+      addLog('⚠️ Episodios ABORTADOS por bloqueos consecutivos de Cloudflare', 'err');
+    } else {
+      addLog('✅ Episodios completados para ' + msg.slug, 'ok');
+    }
   } else if (msg.type === 'firebase') {
-    addLog('  [FIREBASE] ' + (msg.ok ? 'guardado' : 'error') + ' ' + msg.tipo + (msg.tmdb_id ? ' (' + msg.tmdb_id + ')' : ''), msg.ok ? 'ok' : 'err');
+    if (msg.tipo === 'episodios') {
+      addLog('  🔥 Firebase: ' + msg.total + ' episodios guardados (' + msg.tmdb_id + ')', 'ok');
+    } else {
+      addLog('  🔥 Firebase: ' + (msg.ok ? 'guardado' : 'error') + ' ' + msg.tipo + (msg.tmdb_id ? ' (' + msg.tmdb_id + ')' : ''), msg.ok ? 'ok' : 'err');
+    }
   }
+
+   
+
+
+
 }
 
 function addLog(text, cls) {
