@@ -101,6 +101,52 @@ function detectBlock(html, title) {
   return checks.some(c => c === true);
 }
 
+////////////////////
+// === Fusionar serie nueva con datos existentes ===
+function mergeSeries(existing, incoming) {
+  if (!existing) return incoming;
+
+  // Crear copia del incoming
+  const merged = JSON.parse(JSON.stringify(incoming));
+
+  // Preservar metadata del existente si el nuevo no la tiene
+  if (!merged.tmdb_id && existing.tmdb_id) merged.tmdb_id = existing.tmdb_id;
+  if (!merged.titulo_original && existing.titulo_original) merged.titulo_original = existing.titulo_original;
+  if (!merged.overview && existing.overview) merged.overview = existing.overview;
+  if (!merged.poster_url && existing.poster_url) merged.poster_url = existing.poster_url;
+  if (!merged.backdrop_url && existing.backdrop_url) merged.backdrop_url = existing.backdrop_url;
+  if (!merged.vote_average && existing.vote_average) merged.vote_average = existing.vote_average;
+  if (!merged.year && existing.year) merged.year = existing.year;
+  if ((!merged.generos || merged.generos.length === 0) && existing.generos) merged.generos = existing.generos;
+
+  // Fusionar episodios: si el nuevo no tiene servidores pero el existente sí, preservarlos
+  if (merged.seasons && existing.seasons) {
+    for (const newSeason of merged.seasons) {
+      const oldSeason = existing.seasons.find(s => s.number === newSeason.number);
+      if (!oldSeason) continue;
+
+      for (const newEp of newSeason.episodes) {
+        const oldEp = oldSeason.episodes.find(e => e.number === newEp.number);
+        if (!oldEp) continue;
+
+        // Si el nuevo episodio NO tiene servidores pero el viejo SÍ, preservar los viejos
+        if ((!newEp.servers || newEp.servers.length === 0) && oldEp.servers && oldEp.servers.length > 0) {
+          newEp.servers = oldEp.servers;
+          newEp.downloadLinks = oldEp.downloadLinks || [];
+          newEp.scrapedAt = oldEp.scrapedAt;
+          newEp.error = oldEp.error || null;
+          newEp.blocked = false;
+        }
+
+        // Preservar título si el nuevo está vacío
+        if (!newEp.title && oldEp.title) newEp.title = oldEp.title;
+      }
+    }
+  }
+
+  return merged;
+}
+
 // === Scraper de servidores de un episodio (o pelicula) ===
 async function scrapeEpisodeServers(page, url) {
   const result = { servers: [], downloadLinks: [], error: null, blocked: false };
@@ -448,7 +494,21 @@ app.post('/api/scrape', async (req, res) => {
             blocked: r.blocked || false
           };
 
-          fs.writeFileSync(path.join(OUT_DIR, slug + '.json'), JSON.stringify(result, null, 2));
+          // Fusionar con la versión existente para no perder servidores de episodios
+const seriesFile = path.join(OUT_SERIES, seriesData.slug + '.json');
+let finalSeriesData = seriesData;
+
+if (fs.existsSync(seriesFile)) {
+  try {
+    const existing = JSON.parse(fs.readFileSync(seriesFile, 'utf8'));
+    finalSeriesData = mergeSeries(existing, seriesData);
+    console.log(`[MERGE] Serie fusionada con existente. Episodios con servidores preservados.`);
+  } catch (e) {
+    console.warn(`[MERGE] No se pudo fusionar: ${e.message}`);
+  }
+}
+
+fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
 
           if (guardarFirebase && result.tmdb_id && !r.blocked) {
             const saved = await fb.guardarPelicula(result.tmdb_id, result);
@@ -509,31 +569,31 @@ app.post('/api/scrape', async (req, res) => {
 
             fs.writeFileSync(path.join(OUT_SERIES, seriesData.slug + '.json'), JSON.stringify(seriesData, null, 2));
 
-            if (guardarFirebase && seriesData.tmdb_id) {
-              const saved = await fb.guardarSerie(seriesData.tmdb_id, seriesData);
-              broadcast({ type: 'firebase', ok: saved, tipo: 'serie', tmdb_id: seriesData.tmdb_id });
+            if (guardarFirebase && finalSeriesData.tmdb_id) {
+  const saved = await fb.guardarSerie(finalSeriesData.tmdb_id, finalSeriesData);
+  broadcast({ type: 'firebase', ok: saved, tipo: 'serie', tmdb_id: finalSeriesData.tmdb_id });
 
-              let epGuardados = 0;
-              for (const season of seriesData.seasons) {
-                for (const ep of season.episodes) {
-                  if (ep.servers && ep.servers.length > 0) {
-                    const okEp = await fb.guardarEpisodio(seriesData.tmdb_id, season.number, ep.number, {
-                      titulo: ep.title,
-                      servidores: ep.servers,
-                      downloadLinks: ep.downloadLinks || [],
-                      url: ep.url,
-                      scrapedAt: ep.scrapedAt || new Date().toISOString()
-                    });
-                    if (okEp) epGuardados++;
-                  }
-                }
-              }
-              broadcast({ type: 'firebase', ok: true, tipo: 'episodios', tmdb_id: seriesData.tmdb_id, total: epGuardados });
-            }
+  let epGuardados = 0;
+  for (const season of finalSeriesData.seasons) {
+    for (const ep of season.episodes) {
+      if (ep.servers && ep.servers.length > 0) {
+        const okEp = await fb.guardarEpisodio(finalSeriesData.tmdb_id, season.number, ep.number, {
+          titulo: ep.title,
+          servidores: ep.servers,
+          downloadLinks: ep.downloadLinks || [],
+          url: ep.url,
+          scrapedAt: ep.scrapedAt || new Date().toISOString()
+        });
+        if (okEp) epGuardados++;
+      }
+    }
+  }
+  broadcast({ type: 'firebase', ok: true, tipo: 'episodios', tmdb_id: finalSeriesData.tmdb_id, total: epGuardados });
+}
 
-            broadcast({ type: 'series', index: i + 1, total: urls.length, series: seriesData });
-            ok++;
-            broadcast({ type: 'result', index: i + 1, total: urls.length, result: seriesData, ok: true });
+broadcast({ type: 'series', index: i + 1, total: urls.length, series: finalSeriesData });
+ok++;
+broadcast({ type: 'result', index: i + 1, total: urls.length, result: finalSeriesData, ok: true });
           }
         }
 
