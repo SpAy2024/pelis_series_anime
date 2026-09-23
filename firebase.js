@@ -3,16 +3,13 @@ require('dotenv').config();
 
 const FIREBASE_URL = process.env.FIREBASE_URL || 'https://peliculasspay-default-rtdb.firebaseio.com';
 
-// ===== Helper: obtener la key correcta (tmdb_id o slug) =====
 function getKey(data, tmdbId) {
   if (tmdbId && String(tmdbId).trim() !== '' && String(tmdbId) !== 'null') {
     return String(tmdbId);
   }
-  // Fallback: usar el slug como key
   return data.slug || 'sin-id';
 }
 
-// ===== PELICULAS =====
 async function guardarPelicula(tmdbId, data) {
   try {
     const key = getKey(data, tmdbId);
@@ -30,7 +27,6 @@ async function guardarPelicula(tmdbId, data) {
   }
 }
 
-// ===== SERIES =====
 async function guardarSerie(tmdbId, data) {
   try {
     const key = getKey(data, tmdbId);
@@ -64,7 +60,6 @@ async function guardarSerie(tmdbId, data) {
   }
 }
 
-// ===== EPISODIOS =====
 async function guardarEpisodio(tmdbIdOrSlug, temporada, episodio, data) {
   try {
     const key = (tmdbIdOrSlug && String(tmdbIdOrSlug) !== 'null')
@@ -94,7 +89,6 @@ async function guardarEpisodio(tmdbIdOrSlug, temporada, episodio, data) {
   }
 }
 
-// ===== LECTURA =====
 async function leerPelicula(key) {
   try {
     const { data } = await axios.get(`${FIREBASE_URL}/peliculas/${key}.json`);

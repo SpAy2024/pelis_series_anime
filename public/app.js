@@ -24,6 +24,8 @@ const modalTitle = $('modal-title');
 const modalIframe = $('modal-iframe');
 const modalServers = $('modal-servers');
 const scrapeAllEpisodesCheckbox = $('scrape-all-episodes');
+const forceTmdbMovie = $('force-tmdb-movie');
+const forceTmdbSerie = $('force-tmdb-serie');
 
 // === WebSocket ===
 function connectWS() {
@@ -48,7 +50,7 @@ function handleWSMessage(msg) {
     progressFill.style.width = ((msg.index - 1) / msg.total * 100) + '%';
     progressText.textContent = 'Scrapeando ' + msg.index + '/' + msg.total + '...';
     addLog('[' + msg.index + '/' + msg.total + '] ' + msg.slug + ' (' + msg.kind + ')', '');
-   } else if (msg.type === 'result') {
+  } else if (msg.type === 'result') {
     progressFill.style.width = (msg.index / msg.total * 100) + '%';
     if (msg.ok) {
       if (msg.result.servidores || msg.result.servers) {
@@ -70,30 +72,28 @@ function handleWSMessage(msg) {
         addLog('[ERR] ' + (msg.result.slug || msg.result.url) + ' - ' + msg.result.error, 'err');
       }
     }
-  
-    } else if (msg.type === 'done') {
+  } else if (msg.type === 'done') {
     progressFill.style.width = '100%';
     let text = 'Completado: ' + msg.ok + ' OK, ' + msg.fail + ' errores';
     if (msg.blocked > 0) text += ' (' + msg.blocked + ' bloqueados por Cloudflare)';
     progressText.textContent = text;
     addLog(text, msg.blocked > 0 ? 'err' : '');
     btnScrape.disabled = false;
-  
   } else if (msg.type === 'episode-result') {
     addLog('[EP] S' + msg.season + 'E' + msg.episode + ' - ' + msg.servers.length + ' servidores', 'ok');
     if (currentSeries && currentSeries.slug === msg.slug) {
       renderEpisodeServers(msg.season, msg.episode, msg.servers);
     }
   } else if (msg.type === 'episodes-start') {
-    addLog('[EPISODIOS] Scrapeando ' + msg.total + ' episodios de ' + msg.slug + '...', '');
+    addLog('🎬 Scrapeando ' + msg.total + ' episodios de ' + msg.slug + '...', '');
   } else if (msg.type === 'episode-progress') {
     const pct = (msg.done / msg.total) * 100;
     progressFill.style.width = pct + '%';
     progressText.textContent = 'Episodios: ' + msg.done + '/' + msg.total + ' (T' + msg.season + 'E' + msg.episode + ')';
     if (msg.done % 5 === 0 || msg.done === msg.total) {
-      addLog('  [EP] ' + msg.done + '/' + msg.total + ' T' + msg.season + 'E' + msg.episode, '');
+      addLog('  📺 ' + msg.done + '/' + msg.total + ' T' + msg.season + 'E' + msg.episode, '');
     }
-   } else if (msg.type === 'episodes-done') {
+  } else if (msg.type === 'episodes-done') {
     if (msg.aborted) {
       addLog('⚠️ Episodios ABORTADOS por bloqueos consecutivos de Cloudflare', 'err');
     } else {
@@ -101,16 +101,11 @@ function handleWSMessage(msg) {
     }
   } else if (msg.type === 'firebase') {
     if (msg.tipo === 'episodios') {
-      addLog('  🔥 Firebase: ' + msg.total + ' episodios guardados (' + msg.tmdb_id + ')', 'ok');
+      addLog('  🔥 Firebase: ' + msg.total + ' episodios guardados (' + (msg.key || msg.tmdb_id) + ')', 'ok');
     } else {
-      addLog('  🔥 Firebase: ' + (msg.ok ? 'guardado' : 'error') + ' ' + msg.tipo + (msg.tmdb_id ? ' (' + msg.tmdb_id + ')' : ''), msg.ok ? 'ok' : 'err');
+      addLog('  🔥 Firebase: ' + (msg.ok ? 'guardado' : 'error') + ' ' + msg.tipo + (msg.key ? ' (' + msg.key + ')' : msg.tmdb_id ? ' (' + msg.tmdb_id + ')' : ''), msg.ok ? 'ok' : 'err');
     }
   }
-
-   
-
-
-
 }
 
 function addLog(text, cls) {
@@ -129,6 +124,8 @@ btnScrape.onclick = async () => {
   if (urls.length === 0) { alert('No hay URLs validas'); return; }
 
   const scrapeAllEpisodes = scrapeAllEpisodesCheckbox ? scrapeAllEpisodesCheckbox.checked : false;
+  const movieTmdbId = forceTmdbMovie ? forceTmdbMovie.value.trim() : '';
+  const serieTmdbId = forceTmdbSerie ? forceTmdbSerie.value.trim() : '';
 
   try {
     await fetch('/api/scrape', {
@@ -137,7 +134,9 @@ btnScrape.onclick = async () => {
       body: JSON.stringify({
         urls,
         scrapeAllEpisodes,
-        guardarFirebase: true
+        guardarFirebase: true,
+        forceMovieTmdbId: movieTmdbId || null,
+        forceSerieTmdbId: serieTmdbId || null
       })
     });
   } catch (e) { alert('Error: ' + e.message); }
@@ -145,6 +144,8 @@ btnScrape.onclick = async () => {
 
 btnClear.onclick = () => {
   urlsInput.value = '';
+  if (forceTmdbMovie) forceTmdbMovie.value = '';
+  if (forceTmdbSerie) forceTmdbSerie.value = '';
   logEl.innerHTML = '';
   progressFill.style.width = '0%';
   progressText.textContent = 'Sin iniciar';
@@ -205,8 +206,16 @@ function renderMovieCard(movie) {
   const card = document.createElement('div');
   card.className = 'movie-card';
   card.innerHTML = '<h3>' + escapeHtml(movie.titulo || movie.title || movie.slug) + '</h3>' +
-                   '<div class="slug">' + escapeHtml(movie.slug) + (movie.tmdb_id ? ' (TMDB: ' + movie.tmdb_id + ')' : '') + '</div>' +
+                   '<div class="slug">' + escapeHtml(movie.slug) + '</div>' +
+                   '<div class="tmdb-badge">' + (movie.tmdb_id ? '🎯 TMDB: ' + movie.tmdb_id : '⚠️ Sin TMDB ID') + '</div>' +
                    '<div class="server-list"></div>';
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'edit-tmdb-btn';
+  editBtn.textContent = '✏️ Editar TMDB ID';
+  editBtn.onclick = () => editTmdbId(movie.slug, 'pelicula', movie.tmdb_id);
+  card.insertBefore(editBtn, card.querySelector('.server-list'));
+
   const list = card.querySelector('.server-list');
   const servers = movie.servidores || movie.servers || [];
   if (servers.length === 0) {
@@ -228,8 +237,16 @@ function renderSeriesCard(series) {
   const card = document.createElement('div');
   card.className = 'movie-card';
   card.innerHTML = '<h3>' + escapeHtml(series.title || series.slug) + '</h3>' +
-                   '<div class="slug">' + escapeHtml((series.type || 'serie') + ' - ' + series.slug) + (series.tmdb_id ? ' (TMDB: ' + series.tmdb_id + ')' : '') + '</div>' +
+                   '<div class="slug">' + escapeHtml((series.type || 'serie') + ' - ' + series.slug) + '</div>' +
+                   '<div class="tmdb-badge">' + (series.tmdb_id ? '🎯 TMDB: ' + series.tmdb_id : '⚠️ Sin TMDB ID') + '</div>' +
                    '<div class="server-list"></div>';
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'edit-tmdb-btn';
+  editBtn.textContent = '✏️ Editar TMDB ID';
+  editBtn.onclick = () => editTmdbId(series.slug, series.type || 'serie', series.tmdb_id);
+  card.insertBefore(editBtn, card.querySelector('.server-list'));
+
   const list = card.querySelector('.server-list');
 
   for (const season of series.seasons) {
@@ -383,6 +400,37 @@ function renderLibrary() {
 
 searchLib.oninput = renderLibrary;
 filterType.onchange = renderLibrary;
+
+// === Editar TMDB ID ===
+async function editTmdbId(slug, type, currentId) {
+  const newId = prompt(
+    'Editar TMDB ID para "' + slug + '"\n\n' +
+    'Actual: ' + (currentId || '(ninguno)') + '\n\n' +
+    'Pega el TMDB ID (numérico, ej: 1197137). Buscalo en themoviedb.org',
+    currentId || ''
+  );
+
+  if (!newId || newId.trim() === '' || newId === currentId) return;
+
+  try {
+    const res = await fetch('/api/update-tmdb', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug, type, tmdb_id: newId.trim() })
+    });
+
+    const data = await res.json();
+
+    if (data.ok) {
+      alert('✅ TMDB ID actualizado a ' + newId + '\n\nTítulo: ' + data.data.titulo);
+      btnLoadJson.click();
+    } else {
+      alert('❌ Error: ' + (data.error || 'desconocido'));
+    }
+  } catch (e) {
+    alert('❌ Error de red: ' + e.message);
+  }
+}
 
 // === Utilidad ===
 function escapeHtml(str) {

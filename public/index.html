@@ -17,7 +17,6 @@
   </header>
 
   <main>
-    <!-- PESTANA SCRAPER -->
     <div class="tab-content active" id="tab-scraper">
       <section class="card">
         <h2>1. Ingresar URLs</h2>
@@ -25,6 +24,26 @@
         <textarea id="urls-input" rows="8" placeholder="https://serieskao.top/pelicula/the-surfer-dqoZfz
 https://serieskao.top/serie/neagley-zz9dsG
 https://serieskao.top/anime/el-magico-libro-de-zero-J33Iqj"></textarea>
+
+        <div class="tmdb-section">
+          <label class="tmdb-label">
+            <span>🎯 Forzar TMDB ID (opcional)</span>
+            <small>Si la búsqueda automática falla o da un ID incorrecto</small>
+          </label>
+          <div class="tmdb-inputs">
+            <div class="tmdb-input-group">
+              <label>TMDB ID de Película:</label>
+              <input type="text" id="force-tmdb-movie" placeholder="Ej: 1197137" autocomplete="off">
+            </div>
+            <div class="tmdb-input-group">
+              <label>TMDB ID de Serie:</label>
+              <input type="text" id="force-tmdb-serie" placeholder="Ej: 112836" autocomplete="off">
+            </div>
+          </div>
+          <small class="tmdb-hint">
+            💡 Búscalo en <a href="https://www.themoviedb.org/" target="_blank">themoviedb.org</a> (está en la URL, ej: <code>/movie/<b>1197137</b></code>)
+          </small>
+        </div>
 
         <label style="display:flex;align-items:center;gap:0.5rem;margin-top:1rem;font-size:0.85rem;cursor:pointer">
           <input type="checkbox" id="scrape-all-episodes">
@@ -54,7 +73,6 @@ https://serieskao.top/anime/el-magico-libro-de-zero-J33Iqj"></textarea>
       </section>
     </div>
 
-    <!-- PESTANA BIBLIOTECA -->
     <div class="tab-content" id="tab-biblioteca">
       <section class="card">
         <h2>Biblioteca</h2>

@@ -23,7 +23,6 @@ if (!fs.existsSync(OUT_SERIES)) fs.mkdirSync(OUT_SERIES);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
-// === Helper para lanzar el navegador con proxy ===
 async function launchBrowser() {
   const launchArgs = [
     '--no-sandbox',
@@ -65,7 +64,6 @@ async function launchBrowser() {
   return { browser, page };
 }
 
-// === Utilidades ===
 function slugFromUrl(url) {
   const m = url.match(/\/(?:pelicula|serie|anime|dorama)\/([^\/\?]+)/);
   return m ? m[1] : null;
@@ -99,7 +97,6 @@ function detectBlock(html, title) {
   return checks.some(c => c === true);
 }
 
-// === Fusionar serie nueva con datos existentes ===
 function mergeSeries(existing, incoming) {
   if (!existing) return incoming;
 
@@ -139,13 +136,11 @@ function mergeSeries(existing, incoming) {
   return merged;
 }
 
-// === Fusionar película nueva con datos existentes ===
 function mergeMovie(existing, incoming) {
   if (!existing) return incoming;
 
   const merged = JSON.parse(JSON.stringify(incoming));
 
-  // Si el nuevo NO tiene servidores pero el viejo SÍ, preservarlos
   if ((!merged.servidores || merged.servidores.length === 0) && existing.servidores && existing.servidores.length > 0) {
     merged.servidores = existing.servidores;
     merged.downloadLinks = existing.downloadLinks || [];
@@ -154,7 +149,6 @@ function mergeMovie(existing, incoming) {
     merged.blocked = false;
   }
 
-  // Preservar metadata
   if (!merged.tmdb_id && existing.tmdb_id) merged.tmdb_id = existing.tmdb_id;
   if (!merged.titulo && existing.titulo) merged.titulo = existing.titulo;
   if (!merged.titulo_original && existing.titulo_original) merged.titulo_original = existing.titulo_original;
@@ -168,7 +162,6 @@ function mergeMovie(existing, incoming) {
   return merged;
 }
 
-// === Scraper de servidores de un episodio (o pelicula) ===
 async function scrapeEpisodeServers(page, url) {
   const result = { servers: [], downloadLinks: [], error: null, blocked: false };
 
@@ -282,7 +275,6 @@ async function scrapeEpisodeServers(page, url) {
   }
 }
 
-// === Scraper de serie/anime (metadata + lista de episodios) ===
 async function scrapeSeries(page, url) {
   const slug = slugFromUrl(url);
   const type = detectType(url);
@@ -369,7 +361,6 @@ async function scrapeSeries(page, url) {
   }
 }
 
-// === Scrapear TODOS los episodios de una serie ===
 async function scrapeAllEpisodesFn(page, seriesData, onProgress) {
   const total = seriesData.seasons.reduce((sum, s) => sum + s.episodes.length, 0);
   let done = 0;
@@ -414,7 +405,6 @@ async function scrapeAllEpisodesFn(page, seriesData, onProgress) {
   return seriesData;
 }
 
-// === API: peliculas guardadas ===
 app.get('/api/enlaces', (req, res) => {
   if (!fs.existsSync(OUT_DIR)) return res.json([]);
   const files = fs.readdirSync(OUT_DIR).filter(f => f.endsWith('.json'));
@@ -425,7 +415,6 @@ app.get('/api/enlaces', (req, res) => {
   res.json(list);
 });
 
-// === API: series guardadas ===
 app.get('/api/series', (req, res) => {
   if (!fs.existsSync(OUT_SERIES)) return res.json([]);
   const files = fs.readdirSync(OUT_SERIES).filter(f => f.endsWith('.json'));
@@ -436,9 +425,14 @@ app.get('/api/series', (req, res) => {
   res.json(list);
 });
 
-// === API: scrape ===
 app.post('/api/scrape', async (req, res) => {
-  const { urls, guardarFirebase = true, scrapeAllEpisodes = false } = req.body;
+  const {
+    urls,
+    guardarFirebase = true,
+    scrapeAllEpisodes = false,
+    forceMovieTmdbId = null,
+    forceSerieTmdbId = null
+  } = req.body;
   if (!Array.isArray(urls) || urls.length === 0) {
     return res.status(400).json({ error: 'urls debe ser un array no vacio' });
   }
@@ -461,7 +455,6 @@ app.post('/api/scrape', async (req, res) => {
 
       try {
         if (type === 'pelicula') {
-          // ========== PELICULA ==========
           console.log(`[MAIN] Procesando pelicula: ${slug}`);
 
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
@@ -483,7 +476,16 @@ app.post('/api/scrape', async (req, res) => {
           const r = await scrapeEpisodeServers(page, url);
 
           let tmdbData = null;
-          if (titulo) {
+
+          if (forceMovieTmdbId) {
+            console.log(`[MAIN] Usando TMDB ID forzado: ${forceMovieTmdbId}`);
+            tmdbData = await tmdb.detallePelicula(forceMovieTmdbId);
+            if (!tmdbData) {
+              console.warn(`[MAIN] No se pudo obtener detalle de TMDB ${forceMovieTmdbId}, usando busqueda automatica`);
+            }
+          }
+
+          if (!tmdbData && titulo) {
             tmdbData = await tmdb.buscarPelicula(titulo, year);
             if (tmdbData) {
               tmdbData = { ...tmdbData, ...await tmdb.detallePelicula(tmdbData.tmdb_id) };
@@ -508,7 +510,6 @@ app.post('/api/scrape', async (req, res) => {
             blocked: r.blocked || false
           };
 
-          // Fusionar con existente
           const movieFile = path.join(OUT_DIR, slug + '.json');
           if (fs.existsSync(movieFile)) {
             try {
@@ -522,7 +523,6 @@ app.post('/api/scrape', async (req, res) => {
 
           fs.writeFileSync(movieFile, JSON.stringify(result, null, 2));
 
-          // Guardar en Firebase (siempre, con tmdb_id o slug)
           if (guardarFirebase && !r.blocked && result.servidores && result.servidores.length > 0) {
             const key = result.tmdb_id || result.slug;
             const saved = await fb.guardarPelicula(result.tmdb_id, result);
@@ -539,7 +539,6 @@ app.post('/api/scrape', async (req, res) => {
           }
 
         } else {
-          // ========== SERIE / ANIME / DORAMA ==========
           console.log(`[MAIN] Procesando serie/anime: ${slug}`);
           const seriesData = await scrapeSeries(page, url);
 
@@ -548,9 +547,17 @@ app.post('/api/scrape', async (req, res) => {
             fail++;
             broadcast({ type: 'result', index: i + 1, total: urls.length, result: seriesData, ok: false, blocked: seriesData.blocked || false });
           } else {
-            // Buscar en TMDB
             let tmdbData = null;
-            if (seriesData.title) {
+
+            if (forceSerieTmdbId) {
+              console.log(`[MAIN] Usando TMDB ID forzado para serie: ${forceSerieTmdbId}`);
+              tmdbData = await tmdb.detalleSerie(forceSerieTmdbId);
+              if (!tmdbData) {
+                console.warn(`[MAIN] No se pudo obtener detalle de TMDB ${forceSerieTmdbId}, usando busqueda automatica`);
+              }
+            }
+
+            if (!tmdbData && seriesData.title) {
               tmdbData = await tmdb.buscarSerie(seriesData.title);
               if (tmdbData) {
                 tmdbData = { ...tmdbData, ...await tmdb.detalleSerie(tmdbData.tmdb_id) };
@@ -568,7 +575,6 @@ app.post('/api/scrape', async (req, res) => {
 
             console.log(`[MAIN] TMDB ID: ${seriesData.tmdb_id || '(no encontrado, usando slug)'}`);
 
-            // Scrapear todos los episodios si se pidió
             if (scrapeAllEpisodes) {
               const totalEps = seriesData.seasons.reduce((s, x) => s + x.episodes.length, 0);
               broadcast({ type: 'episodes-start', slug: seriesData.slug, total: totalEps });
@@ -586,7 +592,6 @@ app.post('/api/scrape', async (req, res) => {
               broadcast({ type: 'episodes-done', slug: seriesData.slug, aborted: seriesData.aborted || false });
             }
 
-            // Fusionar con la versión existente
             const seriesFile = path.join(OUT_SERIES, seriesData.slug + '.json');
             let finalSeriesData = seriesData;
 
@@ -602,13 +607,11 @@ app.post('/api/scrape', async (req, res) => {
 
             fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
 
-            // Guardar en Firebase (siempre, con tmdb_id o slug)
             if (guardarFirebase) {
               const key = finalSeriesData.tmdb_id || finalSeriesData.slug;
               const saved = await fb.guardarSerie(finalSeriesData.tmdb_id, finalSeriesData);
               broadcast({ type: 'firebase', ok: saved, tipo: 'serie', key });
 
-              // Guardar episodios con servidores
               let epGuardados = 0;
               for (const season of finalSeriesData.seasons) {
                 for (const ep of season.episodes) {
@@ -653,7 +656,6 @@ app.post('/api/scrape', async (req, res) => {
   })();
 });
 
-// === API: scrapear un episodio especifico ===
 app.post('/api/scrape-episode', async (req, res) => {
   const { url, slug, season, episode, tmdb_id, guardarFirebase = true } = req.body;
   if (!url) return res.status(400).json({ error: 'url requerida' });
@@ -720,7 +722,74 @@ app.post('/api/scrape-episode', async (req, res) => {
   })();
 });
 
-// === API: listar desde Firebase ===
+app.post('/api/update-tmdb', async (req, res) => {
+  const { slug, type, tmdb_id } = req.body;
+  if (!slug || !type || !tmdb_id) {
+    return res.status(400).json({ error: 'faltan campos: slug, type, tmdb_id' });
+  }
+
+  try {
+    const isMovie = type === 'pelicula';
+    const file = path.join(isMovie ? OUT_DIR : OUT_SERIES, slug + '.json');
+
+    if (!fs.existsSync(file)) {
+      return res.status(404).json({ error: 'no encontrado' });
+    }
+
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+
+    let tmdbData = null;
+    if (isMovie) {
+      tmdbData = await tmdb.detallePelicula(tmdb_id);
+    } else {
+      tmdbData = await tmdb.detalleSerie(tmdb_id);
+    }
+
+    if (!tmdbData) {
+      return res.status(404).json({ error: 'TMDB ID no válido o sin datos' });
+    }
+
+    data.tmdb_id = String(tmdb_id);
+    if (tmdbData.titulo) data.titulo = tmdbData.titulo;
+    if (tmdbData.titulo_original) data.titulo_original = tmdbData.titulo_original;
+    if (tmdbData.overview) data.overview = tmdbData.overview;
+    if (tmdbData.poster_url) data.poster_url = tmdbData.poster_url;
+    if (tmdbData.backdrop_url) data.backdrop_url = tmdbData.backdrop_url;
+    if (tmdbData.vote_average) data.vote_average = tmdbData.vote_average;
+    if (tmdbData.year) data.year = tmdbData.year;
+    if (tmdbData.generos) data.generos = tmdbData.generos;
+
+    fs.writeFileSync(file, JSON.stringify(data, null, 2));
+
+    let saved = false;
+    if (isMovie) {
+      saved = await fb.guardarPelicula(tmdb_id, data);
+    } else {
+      saved = await fb.guardarSerie(tmdb_id, data);
+
+      for (const season of data.seasons || []) {
+        for (const ep of season.episodes || []) {
+          if (ep.servers && ep.servers.length > 0) {
+            await fb.guardarEpisodio(tmdb_id, season.number, ep.number, {
+              titulo: ep.title,
+              servidores: ep.servers,
+              downloadLinks: ep.downloadLinks || [],
+              url: ep.url,
+              slug: data.slug,
+              scrapedAt: ep.scrapedAt || new Date().toISOString()
+            });
+          }
+        }
+      }
+    }
+
+    res.json({ ok: true, saved, data });
+  } catch (e) {
+    console.error('update-tmdb error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/firebase/peliculas', async (req, res) => {
   try {
     const axios = require('axios');

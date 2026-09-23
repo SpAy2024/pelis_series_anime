@@ -33,24 +33,14 @@ header h1 { font-size: 1.2rem; }
 }
 .status.connected { background: var(--success); color: #000; }
 
-header .tabs {
-  display: flex;
-  gap: 0.5rem;
-  margin-left: 2rem;
-}
+header .tabs { display: flex; gap: 0.5rem; margin-left: 2rem; }
 .tab {
-  background: transparent;
-  border: none;
-  color: var(--text-dim);
-  padding: 0.5rem 1rem;
-  cursor: pointer;
-  font-size: 0.9rem;
+  background: transparent; border: none;
+  color: var(--text-dim); padding: 0.5rem 1rem;
+  cursor: pointer; font-size: 0.9rem;
   border-bottom: 2px solid transparent;
 }
-.tab.active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
-}
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 .tab-content { display: none; }
 .tab-content.active { display: block; }
 
@@ -154,7 +144,7 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 }
 .movie-card .slug {
   font-size: 0.7rem; color: var(--text-dim);
-  margin-bottom: 0.75rem; word-break: break-all;
+  margin-bottom: 0.5rem; word-break: break-all;
 }
 
 .server-list { display: flex; flex-direction: column; gap: 0.3rem; }
@@ -207,3 +197,111 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .player-wrapper iframe { width: 100%; height: 100%; border: none; }
 
 .modal-servers { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+
+/* TMDB section */
+.tmdb-section {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.tmdb-label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.tmdb-label small {
+  font-weight: 400;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
+.tmdb-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.tmdb-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.tmdb-input-group label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.tmdb-input-group input {
+  padding: 0.5rem 0.75rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  color: var(--text);
+  font-family: monospace;
+  font-size: 0.85rem;
+}
+
+.tmdb-input-group input:focus {
+  outline: 1px solid var(--accent);
+}
+
+.tmdb-hint {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.tmdb-hint a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.tmdb-hint code {
+  background: var(--bg-card);
+  padding: 0.1rem 0.3rem;
+  border-radius: 0.2rem;
+}
+
+.tmdb-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.4rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  color: var(--text-dim);
+  font-family: monospace;
+}
+
+.edit-tmdb-btn {
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--text-dim);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.7rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+  width: 100%;
+}
+.edit-tmdb-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+@media (max-width: 600px) {
+  .tmdb-inputs {
+    grid-template-columns: 1fr;
+  }
+}
