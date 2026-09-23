@@ -97,71 +97,6 @@ function detectBlock(html, title) {
   return checks.some(c => c === true);
 }
 
-function mergeSeries(existing, incoming) {
-  if (!existing) return incoming;
-
-  const merged = JSON.parse(JSON.stringify(incoming));
-
-  if (!merged.tmdb_id && existing.tmdb_id) merged.tmdb_id = existing.tmdb_id;
-  if (!merged.titulo_original && existing.titulo_original) merged.titulo_original = existing.titulo_original;
-  if (!merged.overview && existing.overview) merged.overview = existing.overview;
-  if (!merged.poster_url && existing.poster_url) merged.poster_url = existing.poster_url;
-  if (!merged.backdrop_url && existing.backdrop_url) merged.backdrop_url = existing.backdrop_url;
-  if (!merged.vote_average && existing.vote_average) merged.vote_average = existing.vote_average;
-  if (!merged.year && existing.year) merged.year = existing.year;
-  if ((!merged.generos || merged.generos.length === 0) && existing.generos) merged.generos = existing.generos;
-
-  if (merged.seasons && existing.seasons) {
-    for (const newSeason of merged.seasons) {
-      const oldSeason = existing.seasons.find(s => s.number === newSeason.number);
-      if (!oldSeason) continue;
-
-      for (const newEp of newSeason.episodes) {
-        const oldEp = oldSeason.episodes.find(e => e.number === newEp.number);
-        if (!oldEp) continue;
-
-        if ((!newEp.servers || newEp.servers.length === 0) && oldEp.servers && oldEp.servers.length > 0) {
-          newEp.servers = oldEp.servers;
-          newEp.downloadLinks = oldEp.downloadLinks || [];
-          newEp.scrapedAt = oldEp.scrapedAt;
-          newEp.error = oldEp.error || null;
-          newEp.blocked = false;
-        }
-
-        if (!newEp.title && oldEp.title) newEp.title = oldEp.title;
-      }
-    }
-  }
-
-  return merged;
-}
-
-function mergeMovie(existing, incoming) {
-  if (!existing) return incoming;
-
-  const merged = JSON.parse(JSON.stringify(incoming));
-
-  if ((!merged.servidores || merged.servidores.length === 0) && existing.servidores && existing.servidores.length > 0) {
-    merged.servidores = existing.servidores;
-    merged.downloadLinks = existing.downloadLinks || [];
-    merged.scrapedAt = existing.scrapedAt;
-    merged.error = existing.error || null;
-    merged.blocked = false;
-  }
-
-  if (!merged.tmdb_id && existing.tmdb_id) merged.tmdb_id = existing.tmdb_id;
-  if (!merged.titulo && existing.titulo) merged.titulo = existing.titulo;
-  if (!merged.titulo_original && existing.titulo_original) merged.titulo_original = existing.titulo_original;
-  if (!merged.overview && existing.overview) merged.overview = existing.overview;
-  if (!merged.poster_url && existing.poster_url) merged.poster_url = existing.poster_url;
-  if (!merged.backdrop_url && existing.backdrop_url) merged.backdrop_url = existing.backdrop_url;
-  if (!merged.vote_average && existing.vote_average) merged.vote_average = existing.vote_average;
-  if (!merged.year && existing.year) merged.year = existing.year;
-  if ((!merged.generos || merged.generos.length === 0) && existing.generos) merged.generos = existing.generos;
-
-  return merged;
-}
-
 async function scrapeEpisodeServers(page, url) {
   const result = { servers: [], downloadLinks: [], error: null, blocked: false };
 
@@ -289,6 +224,7 @@ async function scrapeSeries(page, url) {
   };
 
   try {
+    console.log(`[SERIES] ============ INICIO SERIES ============`);
     console.log(`[SERIES] Navegando a: ${url}`);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
 
@@ -307,7 +243,20 @@ async function scrapeSeries(page, url) {
     result.description = await page.$eval('.detail-hero__desc', el => el.textContent.trim()).catch(() => null);
     console.log(`[SERIES] Titulo extraido: ${result.title}`);
 
-    const seasons = await page.evaluate(() => {
+    // === EXTRAER TEMPORADAS Y EPISODIOS ===
+    // Primero ver qué estructura usa esta serie
+    const seasonLinks = await page.evaluate(() => {
+      const links = [];
+      document.querySelectorAll('a[href*="/temporada/"]').forEach(a => {
+        links.push({ href: a.getAttribute('href'), text: (a.textContent || '').trim().slice(0, 50) });
+      });
+      return links;
+    });
+    console.log(`[SERIES] Links con /temporada/: ${seasonLinks.length}`);
+    seasonLinks.slice(0, 5).forEach(l => console.log(`  → ${l.text}: ${l.href}`));
+
+    // Detectar estructura de URLs
+    let seasons = await page.evaluate(() => {
       const set = new Set();
       document.querySelectorAll('a[href*="/temporada/"]').forEach(a => {
         const m = a.getAttribute('href').match(/\/temporada\/(\d+)/);
@@ -320,28 +269,113 @@ async function scrapeSeries(page, url) {
     console.log(`[SERIES] Temporadas: ${seasons.join(', ')}`);
 
     for (const seasonNum of seasons) {
-      const seasonUrl = url.replace(/\/$/, '') + '/temporada/' + seasonNum + '/capitulo/1';
-      console.log(`[SERIES] Navegando a temporada ${seasonNum}`);
-      await page.goto(seasonUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
-      await new Promise(r => setTimeout(r, 2000));
+      // Probar primero el formato /temporada/N/capitulo/1
+      let seasonUrl = url.replace(/\/$/, '') + '/temporada/' + seasonNum + '/capitulo/1';
+      console.log(`[SERIES] → Probando: ${seasonUrl}`);
 
+      let response = null;
+      try {
+        response = await page.goto(seasonUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+      } catch (e) {
+        console.log(`[SERIES] Error navegando: ${e.message}`);
+      }
+
+      // Verificar si dio 404 o si cargó bien
+      let status = response ? response.status() : 0;
+      let pageTitle = await page.title().catch(() => '?');
+      console.log(`[SERIES] Status: ${status} | Titulo: ${pageTitle}`);
+
+      // Si dio 404, probar formato /temporada/N/episodio/1
+      if (status === 404 || pageTitle.includes('404') || pageTitle.includes('Not Found')) {
+        console.log(`[SERIES] 404 con /capitulo/. Probando /episodio/...`);
+        seasonUrl = url.replace(/\/$/, '') + '/temporada/' + seasonNum + '/episodio/1';
+        try {
+          response = await page.goto(seasonUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+          status = response.status();
+          pageTitle = await page.title().catch(() => '?');
+          console.log(`[SERIES] /episodio/ → Status: ${status} | Titulo: ${pageTitle}`);
+        } catch (e) {
+          console.log(`[SERIES] Error: ${e.message}`);
+        }
+      }
+
+      // Si sigue 404, probar sin temporada: /capitulo/1
+      if (status === 404 || pageTitle.includes('404') || pageTitle.includes('Not Found')) {
+        console.log(`[SERIES] 404 con /episodio/. Probando /capitulo/...`);
+        seasonUrl = url.replace(/\/$/, '') + '/capitulo/1';
+        try {
+          response = await page.goto(seasonUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+          status = response.status();
+          pageTitle = await page.title().catch(() => '?');
+          console.log(`[SERIES] /capitulo/ → Status: ${status} | Titulo: ${pageTitle}`);
+        } catch (e) {
+          console.log(`[SERIES] Error: ${e.message}`);
+        }
+      }
+
+      // Si sigue 404, probar la URL de la serie (episodios en la misma página)
+      if (status === 404 || pageTitle.includes('404') || pageTitle.includes('Not Found')) {
+        console.log(`[SERIES] 404 con /capitulo/. Usando URL de la serie (posible SPA)`);
+        seasonUrl = url;
+        try {
+          response = await page.goto(seasonUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+          status = response.status();
+          pageTitle = await page.title().catch(() => '?');
+          console.log(`[SERIES] URL serie → Status: ${status} | Titulo: ${pageTitle}`);
+        } catch (e) {
+          console.log(`[SERIES] Error: ${e.message}`);
+        }
+      }
+
+      // Esperar a que cargue todo
+      await new Promise(r => setTimeout(r, 3000));
+
+      // Buscar links de episodios con cualquier patrón
       const episodes = await page.evaluate((baseUrl, seasonNum) => {
         const eps = [];
         const seen = new Set();
 
-        document.querySelectorAll('a[href*="/capitulo/"]').forEach(a => {
+        // Múltiples patrones de URL
+        const patterns = [
+          /\/temporada\/(\d+)\/capitulo\/(\d+)/,
+          /\/temporada\/(\d+)\/episodio\/(\d+)/,
+          /\/capitulo\/(\d+)/,
+          /\/episodio\/(\d+)/,
+          /\/(\d+)x(\d+)/
+        ];
+
+        document.querySelectorAll('a[href]').forEach(a => {
           const href = a.getAttribute('href');
-          const m = href.match(/\/temporada\/(\d+)\/capitulo\/(\d+)/);
-          if (m && parseInt(m[1]) === seasonNum) {
-            const num = parseInt(m[2]);
-            if (!seen.has(num)) {
-              seen.add(num);
-              const rawTitle = (a.textContent || '').trim().replace(/\s+/g, ' ');
-              eps.push({
-                number: num,
-                title: rawTitle || ('Episodio ' + num),
-                url: href.startsWith('http') ? href : 'https://serieskao.top' + href
-              });
+          if (!href) return;
+
+          for (const pattern of patterns) {
+            const m = href.match(pattern);
+            if (m) {
+              let num = 0;
+              let season = seasonNum;
+
+              if (pattern.source.includes('(\\d+).*(\\d+)')) {
+                // Formato NxM
+                season = parseInt(m[1]);
+                num = parseInt(m[2]);
+              } else if (m.length === 3) {
+                // Formato /temporada/N/capitulo/M
+                season = parseInt(m[1]);
+                num = parseInt(m[2]);
+              } else if (m.length === 2) {
+                // Formato /capitulo/M o /episodio/M
+                num = parseInt(m[1]);
+              }
+
+              if (num > 0 && !seen.has(num) && season === seasonNum) {
+                seen.add(num);
+                eps.push({
+                  number: num,
+                  title: (a.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80) || ('Episodio ' + num),
+                  url: href.startsWith('http') ? href : 'https://serieskao.top' + href
+                });
+              }
+              break;
             }
           }
         });
@@ -350,9 +384,13 @@ async function scrapeSeries(page, url) {
       }, url, seasonNum);
 
       console.log(`[SERIES] T${seasonNum}: ${episodes.length} episodios`);
+      if (episodes.length > 0) {
+        console.log(`  Primeros: ${JSON.stringify(episodes.slice(0, 3))}`);
+      }
       result.seasons.push({ number: seasonNum, episodes });
     }
 
+    console.log(`[SERIES] ============ FIN SERIES ============`);
     return result;
   } catch (e) {
     console.error(`[SERIES] ERROR: ${e.message}`);
@@ -426,13 +464,7 @@ app.get('/api/series', (req, res) => {
 });
 
 app.post('/api/scrape', async (req, res) => {
-  const {
-    urls,
-    guardarFirebase = true,
-    scrapeAllEpisodes = false,
-    forceMovieTmdbId = null,
-    forceSerieTmdbId = null
-  } = req.body;
+  const { urls, guardarFirebase = true, scrapeAllEpisodes = false } = req.body;
   if (!Array.isArray(urls) || urls.length === 0) {
     return res.status(400).json({ error: 'urls debe ser un array no vacio' });
   }
@@ -462,7 +494,6 @@ app.post('/api/scrape', async (req, res) => {
           const title = await page.title().catch(() => '');
 
           if (detectBlock(htmlContent, title)) {
-            console.log(`[MAIN] Pelicula bloqueada por Cloudflare`);
             blocked++;
             const result = { url, slug, error: 'cloudflare_blocked', blocked: true };
             broadcast({ type: 'result', index: i + 1, total: urls.length, result, ok: false, blocked: true });
@@ -476,23 +507,14 @@ app.post('/api/scrape', async (req, res) => {
           const r = await scrapeEpisodeServers(page, url);
 
           let tmdbData = null;
-
-          if (forceMovieTmdbId) {
-            console.log(`[MAIN] Usando TMDB ID forzado: ${forceMovieTmdbId}`);
-            tmdbData = await tmdb.detallePelicula(forceMovieTmdbId);
-            if (!tmdbData) {
-              console.warn(`[MAIN] No se pudo obtener detalle de TMDB ${forceMovieTmdbId}, usando busqueda automatica`);
-            }
-          }
-
-          if (!tmdbData && titulo) {
+          if (titulo) {
             tmdbData = await tmdb.buscarPelicula(titulo, year);
             if (tmdbData) {
               tmdbData = { ...tmdbData, ...await tmdb.detallePelicula(tmdbData.tmdb_id) };
             }
           }
 
-          let result = {
+          const result = {
             url, slug, tipo: 'pelicula',
             titulo: tmdbData?.titulo || titulo,
             titulo_original: tmdbData?.titulo_original || null,
@@ -510,23 +532,11 @@ app.post('/api/scrape', async (req, res) => {
             blocked: r.blocked || false
           };
 
-          const movieFile = path.join(OUT_DIR, slug + '.json');
-          if (fs.existsSync(movieFile)) {
-            try {
-              const existing = JSON.parse(fs.readFileSync(movieFile, 'utf8'));
-              result = mergeMovie(existing, result);
-              console.log(`[MERGE] Pelicula fusionada con existente`);
-            } catch (e) {
-              console.warn(`[MERGE] No se pudo fusionar pelicula: ${e.message}`);
-            }
-          }
+          fs.writeFileSync(path.join(OUT_DIR, slug + '.json'), JSON.stringify(result, null, 2));
 
-          fs.writeFileSync(movieFile, JSON.stringify(result, null, 2));
-
-          if (guardarFirebase && !r.blocked && result.servidores && result.servidores.length > 0) {
-            const key = result.tmdb_id || result.slug;
+          if (guardarFirebase && result.tmdb_id && !r.blocked && result.servidores && result.servidores.length > 0) {
             const saved = await fb.guardarPelicula(result.tmdb_id, result);
-            broadcast({ type: 'firebase', ok: saved, tipo: 'pelicula', key });
+            broadcast({ type: 'firebase', ok: saved, tipo: 'pelicula', tmdb_id: result.tmdb_id });
           }
 
           if (r.error) {
@@ -548,16 +558,7 @@ app.post('/api/scrape', async (req, res) => {
             broadcast({ type: 'result', index: i + 1, total: urls.length, result: seriesData, ok: false, blocked: seriesData.blocked || false });
           } else {
             let tmdbData = null;
-
-            if (forceSerieTmdbId) {
-              console.log(`[MAIN] Usando TMDB ID forzado para serie: ${forceSerieTmdbId}`);
-              tmdbData = await tmdb.detalleSerie(forceSerieTmdbId);
-              if (!tmdbData) {
-                console.warn(`[MAIN] No se pudo obtener detalle de TMDB ${forceSerieTmdbId}, usando busqueda automatica`);
-              }
-            }
-
-            if (!tmdbData && seriesData.title) {
+            if (seriesData.title) {
               tmdbData = await tmdb.buscarSerie(seriesData.title);
               if (tmdbData) {
                 tmdbData = { ...tmdbData, ...await tmdb.detalleSerie(tmdbData.tmdb_id) };
@@ -572,8 +573,6 @@ app.post('/api/scrape', async (req, res) => {
             seriesData.generos = tmdbData?.generos || [];
             seriesData.vote_average = tmdbData?.vote_average || null;
             seriesData.year = tmdbData?.year || null;
-
-            console.log(`[MAIN] TMDB ID: ${seriesData.tmdb_id || '(no encontrado, usando slug)'}`);
 
             if (scrapeAllEpisodes) {
               const totalEps = seriesData.seasons.reduce((s, x) => s + x.episodes.length, 0);
@@ -592,53 +591,33 @@ app.post('/api/scrape', async (req, res) => {
               broadcast({ type: 'episodes-done', slug: seriesData.slug, aborted: seriesData.aborted || false });
             }
 
-            const seriesFile = path.join(OUT_SERIES, seriesData.slug + '.json');
-            let finalSeriesData = seriesData;
+            fs.writeFileSync(path.join(OUT_SERIES, seriesData.slug + '.json'), JSON.stringify(seriesData, null, 2));
 
-            if (fs.existsSync(seriesFile)) {
-              try {
-                const existing = JSON.parse(fs.readFileSync(seriesFile, 'utf8'));
-                finalSeriesData = mergeSeries(existing, seriesData);
-                console.log(`[MERGE] Serie fusionada con existente. Episodios con servidores preservados.`);
-              } catch (e) {
-                console.warn(`[MERGE] No se pudo fusionar: ${e.message}`);
-              }
-            }
-
-            fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
-
-            if (guardarFirebase) {
-              const key = finalSeriesData.tmdb_id || finalSeriesData.slug;
-              const saved = await fb.guardarSerie(finalSeriesData.tmdb_id, finalSeriesData);
-              broadcast({ type: 'firebase', ok: saved, tipo: 'serie', key });
+            if (guardarFirebase && seriesData.tmdb_id) {
+              const saved = await fb.guardarSerie(seriesData.tmdb_id, seriesData);
+              broadcast({ type: 'firebase', ok: saved, tipo: 'serie', tmdb_id: seriesData.tmdb_id });
 
               let epGuardados = 0;
-              for (const season of finalSeriesData.seasons) {
+              for (const season of seriesData.seasons) {
                 for (const ep of season.episodes) {
                   if (ep.servers && ep.servers.length > 0) {
-                    const okEp = await fb.guardarEpisodio(
-                      finalSeriesData.tmdb_id || finalSeriesData.slug,
-                      season.number,
-                      ep.number,
-                      {
-                        titulo: ep.title,
-                        servidores: ep.servers,
-                        downloadLinks: ep.downloadLinks || [],
-                        url: ep.url,
-                        slug: finalSeriesData.slug,
-                        scrapedAt: ep.scrapedAt || new Date().toISOString()
-                      }
-                    );
+                    const okEp = await fb.guardarEpisodio(seriesData.tmdb_id, season.number, ep.number, {
+                      titulo: ep.title,
+                      servidores: ep.servers,
+                      downloadLinks: ep.downloadLinks || [],
+                      url: ep.url,
+                      scrapedAt: ep.scrapedAt || new Date().toISOString()
+                    });
                     if (okEp) epGuardados++;
                   }
                 }
               }
-              broadcast({ type: 'firebase', ok: true, tipo: 'episodios', key, total: epGuardados });
+              broadcast({ type: 'firebase', ok: true, tipo: 'episodios', tmdb_id: seriesData.tmdb_id, total: epGuardados });
             }
 
-            broadcast({ type: 'series', index: i + 1, total: urls.length, series: finalSeriesData });
+            broadcast({ type: 'series', index: i + 1, total: urls.length, series: seriesData });
             ok++;
-            broadcast({ type: 'result', index: i + 1, total: urls.length, result: finalSeriesData, ok: true });
+            broadcast({ type: 'result', index: i + 1, total: urls.length, result: seriesData, ok: true });
           }
         }
 
@@ -677,12 +656,8 @@ app.post('/api/scrape-episode', async (req, res) => {
     await browser.close();
 
     const seriesFile = path.join(OUT_SERIES, slug + '.json');
-    let seriesKey = tmdb_id || slug;
-
     if (fs.existsSync(seriesFile)) {
       const series = JSON.parse(fs.readFileSync(seriesFile, 'utf8'));
-      seriesKey = series.tmdb_id || slug;
-
       const seasonIdx = series.seasons.findIndex(s => s.number === season);
       const epIdx = seasonIdx >= 0 ? series.seasons[seasonIdx].episodes.findIndex(e => e.number === episode) : -1;
 
@@ -696,17 +671,16 @@ app.post('/api/scrape-episode', async (req, res) => {
 
         fs.writeFileSync(seriesFile, JSON.stringify(series, null, 2));
 
-        if (guardarFirebase && !r.blocked) {
+        if (guardarFirebase && tmdb_id && !r.blocked) {
           const episodeData = {
             titulo: epTitle || ('Episodio ' + episode),
             servidores: r.servers,
             downloadLinks: r.downloadLinks,
             url,
-            slug,
             scrapedAt: new Date().toISOString()
           };
-          const saved = await fb.guardarEpisodio(seriesKey, season, episode, episodeData);
-          broadcast({ type: 'firebase', ok: saved, tipo: 'episodio', key: seriesKey, season, episode });
+          const saved = await fb.guardarEpisodio(tmdb_id, season, episode, episodeData);
+          broadcast({ type: 'firebase', ok: saved, tipo: 'episodio', tmdb_id, season, episode });
         }
       }
     }
@@ -720,74 +694,6 @@ app.post('/api/scrape-episode', async (req, res) => {
       blocked: r.blocked || false
     });
   })();
-});
-
-app.post('/api/update-tmdb', async (req, res) => {
-  const { slug, type, tmdb_id } = req.body;
-  if (!slug || !type || !tmdb_id) {
-    return res.status(400).json({ error: 'faltan campos: slug, type, tmdb_id' });
-  }
-
-  try {
-    const isMovie = type === 'pelicula';
-    const file = path.join(isMovie ? OUT_DIR : OUT_SERIES, slug + '.json');
-
-    if (!fs.existsSync(file)) {
-      return res.status(404).json({ error: 'no encontrado' });
-    }
-
-    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-
-    let tmdbData = null;
-    if (isMovie) {
-      tmdbData = await tmdb.detallePelicula(tmdb_id);
-    } else {
-      tmdbData = await tmdb.detalleSerie(tmdb_id);
-    }
-
-    if (!tmdbData) {
-      return res.status(404).json({ error: 'TMDB ID no válido o sin datos' });
-    }
-
-    data.tmdb_id = String(tmdb_id);
-    if (tmdbData.titulo) data.titulo = tmdbData.titulo;
-    if (tmdbData.titulo_original) data.titulo_original = tmdbData.titulo_original;
-    if (tmdbData.overview) data.overview = tmdbData.overview;
-    if (tmdbData.poster_url) data.poster_url = tmdbData.poster_url;
-    if (tmdbData.backdrop_url) data.backdrop_url = tmdbData.backdrop_url;
-    if (tmdbData.vote_average) data.vote_average = tmdbData.vote_average;
-    if (tmdbData.year) data.year = tmdbData.year;
-    if (tmdbData.generos) data.generos = tmdbData.generos;
-
-    fs.writeFileSync(file, JSON.stringify(data, null, 2));
-
-    let saved = false;
-    if (isMovie) {
-      saved = await fb.guardarPelicula(tmdb_id, data);
-    } else {
-      saved = await fb.guardarSerie(tmdb_id, data);
-
-      for (const season of data.seasons || []) {
-        for (const ep of season.episodes || []) {
-          if (ep.servers && ep.servers.length > 0) {
-            await fb.guardarEpisodio(tmdb_id, season.number, ep.number, {
-              titulo: ep.title,
-              servidores: ep.servers,
-              downloadLinks: ep.downloadLinks || [],
-              url: ep.url,
-              slug: data.slug,
-              scrapedAt: ep.scrapedAt || new Date().toISOString()
-            });
-          }
-        }
-      }
-    }
-
-    res.json({ ok: true, saved, data });
-  } catch (e) {
-    console.error('update-tmdb error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
 });
 
 app.get('/api/firebase/peliculas', async (req, res) => {
