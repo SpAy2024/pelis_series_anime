@@ -44,7 +44,6 @@ async function launchBrowser() {
 
   const page = await browser.newPage();
 
-  // Autenticar el proxy si hay password
   if (process.env.PROXY_PASSWORD) {
     try {
       await page.authenticate({
@@ -86,7 +85,6 @@ function broadcast(msg) {
   });
 }
 
-// === Detector de Cloudflare / Access Denied ===
 function detectBlock(html, title) {
   const checks = [
     html.includes('Error 1005'),
@@ -101,15 +99,12 @@ function detectBlock(html, title) {
   return checks.some(c => c === true);
 }
 
-////////////////////
 // === Fusionar serie nueva con datos existentes ===
 function mergeSeries(existing, incoming) {
   if (!existing) return incoming;
 
-  // Crear copia del incoming
   const merged = JSON.parse(JSON.stringify(incoming));
 
-  // Preservar metadata del existente si el nuevo no la tiene
   if (!merged.tmdb_id && existing.tmdb_id) merged.tmdb_id = existing.tmdb_id;
   if (!merged.titulo_original && existing.titulo_original) merged.titulo_original = existing.titulo_original;
   if (!merged.overview && existing.overview) merged.overview = existing.overview;
@@ -119,7 +114,6 @@ function mergeSeries(existing, incoming) {
   if (!merged.year && existing.year) merged.year = existing.year;
   if ((!merged.generos || merged.generos.length === 0) && existing.generos) merged.generos = existing.generos;
 
-  // Fusionar episodios: si el nuevo no tiene servidores pero el existente sí, preservarlos
   if (merged.seasons && existing.seasons) {
     for (const newSeason of merged.seasons) {
       const oldSeason = existing.seasons.find(s => s.number === newSeason.number);
@@ -129,7 +123,6 @@ function mergeSeries(existing, incoming) {
         const oldEp = oldSeason.episodes.find(e => e.number === newEp.number);
         if (!oldEp) continue;
 
-        // Si el nuevo episodio NO tiene servidores pero el viejo SÍ, preservar los viejos
         if ((!newEp.servers || newEp.servers.length === 0) && oldEp.servers && oldEp.servers.length > 0) {
           newEp.servers = oldEp.servers;
           newEp.downloadLinks = oldEp.downloadLinks || [];
@@ -138,11 +131,39 @@ function mergeSeries(existing, incoming) {
           newEp.blocked = false;
         }
 
-        // Preservar título si el nuevo está vacío
         if (!newEp.title && oldEp.title) newEp.title = oldEp.title;
       }
     }
   }
+
+  return merged;
+}
+
+// === Fusionar película nueva con datos existentes ===
+function mergeMovie(existing, incoming) {
+  if (!existing) return incoming;
+
+  const merged = JSON.parse(JSON.stringify(incoming));
+
+  // Si el nuevo NO tiene servidores pero el viejo SÍ, preservarlos
+  if ((!merged.servidores || merged.servidores.length === 0) && existing.servidores && existing.servidores.length > 0) {
+    merged.servidores = existing.servidores;
+    merged.downloadLinks = existing.downloadLinks || [];
+    merged.scrapedAt = existing.scrapedAt;
+    merged.error = existing.error || null;
+    merged.blocked = false;
+  }
+
+  // Preservar metadata
+  if (!merged.tmdb_id && existing.tmdb_id) merged.tmdb_id = existing.tmdb_id;
+  if (!merged.titulo && existing.titulo) merged.titulo = existing.titulo;
+  if (!merged.titulo_original && existing.titulo_original) merged.titulo_original = existing.titulo_original;
+  if (!merged.overview && existing.overview) merged.overview = existing.overview;
+  if (!merged.poster_url && existing.poster_url) merged.poster_url = existing.poster_url;
+  if (!merged.backdrop_url && existing.backdrop_url) merged.backdrop_url = existing.backdrop_url;
+  if (!merged.vote_average && existing.vote_average) merged.vote_average = existing.vote_average;
+  if (!merged.year && existing.year) merged.year = existing.year;
+  if ((!merged.generos || merged.generos.length === 0) && existing.generos) merged.generos = existing.generos;
 
   return merged;
 }
@@ -166,7 +187,6 @@ async function scrapeEpisodeServers(page, url) {
     const htmlContent = await page.content();
     console.log(`[SCRAPE] HTML length: ${htmlContent.length}`);
 
-    // Detectar Cloudflare
     if (detectBlock(htmlContent, title)) {
       console.log(`[SCRAPE] BLOQUEADO por Cloudflare`);
       result.error = 'cloudflare_blocked';
@@ -174,7 +194,6 @@ async function scrapeEpisodeServers(page, url) {
       return result;
     }
 
-    // Verificar selector
     const hasSelector = htmlContent.includes('player-box__servers');
     console.log(`[SCRAPE] Tiene player-box__servers: ${hasSelector}`);
 
@@ -186,11 +205,9 @@ async function scrapeEpisodeServers(page, url) {
       return result;
     }
 
-    console.log(`[SCRAPE] Esperando selector .player-box__servers .server-btn (15s)...`);
     await page.waitForSelector('.player-box__servers .server-btn', { timeout: 15000 });
     console.log(`[SCRAPE] SELECTOR ENCONTRADO`);
 
-    // Simular actividad humana
     await page.mouse.move(500, 400);
     await new Promise(r => setTimeout(r, 800));
     await page.mouse.move(800, 600);
@@ -201,7 +218,6 @@ async function scrapeEpisodeServers(page, url) {
     await page.click('.player-box__servers .server-btn');
     await new Promise(r => setTimeout(r, 6000));
 
-    // Buscar iframe
     let iframeFrame = null;
     for (const frame of page.frames()) {
       if (frame.url().includes('/vidurl/')) { iframeFrame = frame; break; }
@@ -214,7 +230,6 @@ async function scrapeEpisodeServers(page, url) {
     }
     console.log(`[SCRAPE] iframe encontrado: ${iframeFrame.url()}`);
 
-    // Esperar POW + descifrado
     let decrypted = null;
     for (let i = 0; i < 30; i++) {
       await new Promise(r => setTimeout(r, 1000));
@@ -243,7 +258,6 @@ async function scrapeEpisodeServers(page, url) {
       return result;
     }
 
-    // Extraer servidores
     for (const file of decrypted.dataLink) {
       if (file.sortedEmbeds) {
         for (const e of file.sortedEmbeds) {
@@ -263,7 +277,6 @@ async function scrapeEpisodeServers(page, url) {
 
   } catch (e) {
     console.error(`[SCRAPE] ERROR: ${e.message}`);
-    console.error(`[SCRAPE] Stack: ${e.stack ? e.stack.slice(0, 500) : 'n/a'}`);
     result.error = e.message;
     return result;
   }
@@ -448,6 +461,7 @@ app.post('/api/scrape', async (req, res) => {
 
       try {
         if (type === 'pelicula') {
+          // ========== PELICULA ==========
           console.log(`[MAIN] Procesando pelicula: ${slug}`);
 
           await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 90000 });
@@ -476,7 +490,7 @@ app.post('/api/scrape', async (req, res) => {
             }
           }
 
-          const result = {
+          let result = {
             url, slug, tipo: 'pelicula',
             titulo: tmdbData?.titulo || titulo,
             titulo_original: tmdbData?.titulo_original || null,
@@ -494,25 +508,25 @@ app.post('/api/scrape', async (req, res) => {
             blocked: r.blocked || false
           };
 
-          // Fusionar con la versión existente para no perder servidores de episodios
-const seriesFile = path.join(OUT_SERIES, seriesData.slug + '.json');
-let finalSeriesData = seriesData;
+          // Fusionar con existente
+          const movieFile = path.join(OUT_DIR, slug + '.json');
+          if (fs.existsSync(movieFile)) {
+            try {
+              const existing = JSON.parse(fs.readFileSync(movieFile, 'utf8'));
+              result = mergeMovie(existing, result);
+              console.log(`[MERGE] Pelicula fusionada con existente`);
+            } catch (e) {
+              console.warn(`[MERGE] No se pudo fusionar pelicula: ${e.message}`);
+            }
+          }
 
-if (fs.existsSync(seriesFile)) {
-  try {
-    const existing = JSON.parse(fs.readFileSync(seriesFile, 'utf8'));
-    finalSeriesData = mergeSeries(existing, seriesData);
-    console.log(`[MERGE] Serie fusionada con existente. Episodios con servidores preservados.`);
-  } catch (e) {
-    console.warn(`[MERGE] No se pudo fusionar: ${e.message}`);
-  }
-}
+          fs.writeFileSync(movieFile, JSON.stringify(result, null, 2));
 
-fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
-
-          if (guardarFirebase && result.tmdb_id && !r.blocked) {
+          // Guardar en Firebase (siempre, con tmdb_id o slug)
+          if (guardarFirebase && !r.blocked && result.servidores && result.servidores.length > 0) {
+            const key = result.tmdb_id || result.slug;
             const saved = await fb.guardarPelicula(result.tmdb_id, result);
-            broadcast({ type: 'firebase', ok: saved, tipo: 'pelicula', tmdb_id: result.tmdb_id });
+            broadcast({ type: 'firebase', ok: saved, tipo: 'pelicula', key });
           }
 
           if (r.error) {
@@ -525,6 +539,7 @@ fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
           }
 
         } else {
+          // ========== SERIE / ANIME / DORAMA ==========
           console.log(`[MAIN] Procesando serie/anime: ${slug}`);
           const seriesData = await scrapeSeries(page, url);
 
@@ -533,6 +548,7 @@ fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
             fail++;
             broadcast({ type: 'result', index: i + 1, total: urls.length, result: seriesData, ok: false, blocked: seriesData.blocked || false });
           } else {
+            // Buscar en TMDB
             let tmdbData = null;
             if (seriesData.title) {
               tmdbData = await tmdb.buscarSerie(seriesData.title);
@@ -550,6 +566,9 @@ fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
             seriesData.vote_average = tmdbData?.vote_average || null;
             seriesData.year = tmdbData?.year || null;
 
+            console.log(`[MAIN] TMDB ID: ${seriesData.tmdb_id || '(no encontrado, usando slug)'}`);
+
+            // Scrapear todos los episodios si se pidió
             if (scrapeAllEpisodes) {
               const totalEps = seriesData.seasons.reduce((s, x) => s + x.episodes.length, 0);
               broadcast({ type: 'episodes-start', slug: seriesData.slug, total: totalEps });
@@ -567,33 +586,56 @@ fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
               broadcast({ type: 'episodes-done', slug: seriesData.slug, aborted: seriesData.aborted || false });
             }
 
-            fs.writeFileSync(path.join(OUT_SERIES, seriesData.slug + '.json'), JSON.stringify(seriesData, null, 2));
+            // Fusionar con la versión existente
+            const seriesFile = path.join(OUT_SERIES, seriesData.slug + '.json');
+            let finalSeriesData = seriesData;
 
-            if (guardarFirebase && finalSeriesData.tmdb_id) {
-  const saved = await fb.guardarSerie(finalSeriesData.tmdb_id, finalSeriesData);
-  broadcast({ type: 'firebase', ok: saved, tipo: 'serie', tmdb_id: finalSeriesData.tmdb_id });
+            if (fs.existsSync(seriesFile)) {
+              try {
+                const existing = JSON.parse(fs.readFileSync(seriesFile, 'utf8'));
+                finalSeriesData = mergeSeries(existing, seriesData);
+                console.log(`[MERGE] Serie fusionada con existente. Episodios con servidores preservados.`);
+              } catch (e) {
+                console.warn(`[MERGE] No se pudo fusionar: ${e.message}`);
+              }
+            }
 
-  let epGuardados = 0;
-  for (const season of finalSeriesData.seasons) {
-    for (const ep of season.episodes) {
-      if (ep.servers && ep.servers.length > 0) {
-        const okEp = await fb.guardarEpisodio(finalSeriesData.tmdb_id, season.number, ep.number, {
-          titulo: ep.title,
-          servidores: ep.servers,
-          downloadLinks: ep.downloadLinks || [],
-          url: ep.url,
-          scrapedAt: ep.scrapedAt || new Date().toISOString()
-        });
-        if (okEp) epGuardados++;
-      }
-    }
-  }
-  broadcast({ type: 'firebase', ok: true, tipo: 'episodios', tmdb_id: finalSeriesData.tmdb_id, total: epGuardados });
-}
+            fs.writeFileSync(seriesFile, JSON.stringify(finalSeriesData, null, 2));
 
-broadcast({ type: 'series', index: i + 1, total: urls.length, series: finalSeriesData });
-ok++;
-broadcast({ type: 'result', index: i + 1, total: urls.length, result: finalSeriesData, ok: true });
+            // Guardar en Firebase (siempre, con tmdb_id o slug)
+            if (guardarFirebase) {
+              const key = finalSeriesData.tmdb_id || finalSeriesData.slug;
+              const saved = await fb.guardarSerie(finalSeriesData.tmdb_id, finalSeriesData);
+              broadcast({ type: 'firebase', ok: saved, tipo: 'serie', key });
+
+              // Guardar episodios con servidores
+              let epGuardados = 0;
+              for (const season of finalSeriesData.seasons) {
+                for (const ep of season.episodes) {
+                  if (ep.servers && ep.servers.length > 0) {
+                    const okEp = await fb.guardarEpisodio(
+                      finalSeriesData.tmdb_id || finalSeriesData.slug,
+                      season.number,
+                      ep.number,
+                      {
+                        titulo: ep.title,
+                        servidores: ep.servers,
+                        downloadLinks: ep.downloadLinks || [],
+                        url: ep.url,
+                        slug: finalSeriesData.slug,
+                        scrapedAt: ep.scrapedAt || new Date().toISOString()
+                      }
+                    );
+                    if (okEp) epGuardados++;
+                  }
+                }
+              }
+              broadcast({ type: 'firebase', ok: true, tipo: 'episodios', key, total: epGuardados });
+            }
+
+            broadcast({ type: 'series', index: i + 1, total: urls.length, series: finalSeriesData });
+            ok++;
+            broadcast({ type: 'result', index: i + 1, total: urls.length, result: finalSeriesData, ok: true });
           }
         }
 
@@ -633,8 +675,12 @@ app.post('/api/scrape-episode', async (req, res) => {
     await browser.close();
 
     const seriesFile = path.join(OUT_SERIES, slug + '.json');
+    let seriesKey = tmdb_id || slug;
+
     if (fs.existsSync(seriesFile)) {
       const series = JSON.parse(fs.readFileSync(seriesFile, 'utf8'));
+      seriesKey = series.tmdb_id || slug;
+
       const seasonIdx = series.seasons.findIndex(s => s.number === season);
       const epIdx = seasonIdx >= 0 ? series.seasons[seasonIdx].episodes.findIndex(e => e.number === episode) : -1;
 
@@ -648,16 +694,17 @@ app.post('/api/scrape-episode', async (req, res) => {
 
         fs.writeFileSync(seriesFile, JSON.stringify(series, null, 2));
 
-        if (guardarFirebase && tmdb_id && !r.blocked) {
+        if (guardarFirebase && !r.blocked) {
           const episodeData = {
             titulo: epTitle || ('Episodio ' + episode),
             servidores: r.servers,
             downloadLinks: r.downloadLinks,
             url,
+            slug,
             scrapedAt: new Date().toISOString()
           };
-          const saved = await fb.guardarEpisodio(tmdb_id, season, episode, episodeData);
-          broadcast({ type: 'firebase', ok: saved, tipo: 'episodio', tmdb_id, season, episode });
+          const saved = await fb.guardarEpisodio(seriesKey, season, episode, episodeData);
+          broadcast({ type: 'firebase', ok: saved, tipo: 'episodio', key: seriesKey, season, episode });
         }
       }
     }

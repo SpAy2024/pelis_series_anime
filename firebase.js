@@ -3,15 +3,26 @@ require('dotenv').config();
 
 const FIREBASE_URL = process.env.FIREBASE_URL || 'https://peliculasspay-default-rtdb.firebaseio.com';
 
+// ===== Helper: obtener la key correcta (tmdb_id o slug) =====
+function getKey(data, tmdbId) {
+  if (tmdbId && String(tmdbId).trim() !== '' && String(tmdbId) !== 'null') {
+    return String(tmdbId);
+  }
+  // Fallback: usar el slug como key
+  return data.slug || 'sin-id';
+}
+
 // ===== PELICULAS =====
-// Guarda la pelicula completa CON servidores en /peliculas/<tmdb_id>
 async function guardarPelicula(tmdbId, data) {
   try {
-    // Limpiar cualquier residuo de series
-    delete data.seasons;
-    delete data.episodios;
+    const key = getKey(data, tmdbId);
+    const payload = { ...data };
+    delete payload.seasons;
+    delete payload.episodios;
+    payload.firebase_key = key;
 
-    await axios.put(`${FIREBASE_URL}/peliculas/${tmdbId}.json`, data);
+    await axios.put(`${FIREBASE_URL}/peliculas/${key}.json`, payload);
+    console.log(`[FB] Pelicula guardada en /peliculas/${key}`);
     return true;
   } catch (e) {
     console.error('Firebase error (pelicula):', e.message);
@@ -20,13 +31,14 @@ async function guardarPelicula(tmdbId, data) {
 }
 
 // ===== SERIES =====
-// Guarda SOLO la metadata en /series/<tmdb_id>
-// NO guarda seasons ni episodios
 async function guardarSerie(tmdbId, data) {
   try {
+    const key = getKey(data, tmdbId);
+
     const serieMeta = {
-      tmdb_id: String(tmdbId),
-      titulo: data.title || data.titulo,
+      tmdb_id: (tmdbId && String(tmdbId) !== 'null') ? String(tmdbId) : null,
+      firebase_key: key,
+      titulo: data.title || data.titulo || null,
       titulo_original: data.titulo_original || null,
       overview: data.overview || data.description || null,
       poster_url: data.poster_url || null,
@@ -39,10 +51,12 @@ async function guardarSerie(tmdbId, data) {
       temporadas: data.temporadas || (data.seasons ? data.seasons.length : null),
       url: data.url || null,
       type: data.type || 'serie',
+      slug: data.slug || null,
       scrapedAt: data.scrapedAt || new Date().toISOString()
     };
 
-    await axios.put(`${FIREBASE_URL}/series/${tmdbId}.json`, serieMeta);
+    await axios.put(`${FIREBASE_URL}/series/${key}.json`, serieMeta);
+    console.log(`[FB] Serie guardada en /series/${key}`);
     return true;
   } catch (e) {
     console.error('Firebase error (serie):', e.message);
@@ -51,10 +65,12 @@ async function guardarSerie(tmdbId, data) {
 }
 
 // ===== EPISODIOS =====
-// Guarda UN episodio CON sus servidores en:
-// /episodios/<tmdb_id>/<temporada>/<episodio>
-async function guardarEpisodio(tmdbId, temporada, episodio, data) {
+async function guardarEpisodio(tmdbIdOrSlug, temporada, episodio, data) {
   try {
+    const key = (tmdbIdOrSlug && String(tmdbIdOrSlug) !== 'null')
+      ? String(tmdbIdOrSlug)
+      : (data.slug || 'sin-id');
+
     const episodeData = {
       numero: episodio,
       temporada: temporada,
@@ -68,7 +84,7 @@ async function guardarEpisodio(tmdbId, temporada, episodio, data) {
     if (data.error) episodeData.error = data.error;
 
     await axios.put(
-      `${FIREBASE_URL}/episodios/${tmdbId}/${temporada}/${episodio}.json`,
+      `${FIREBASE_URL}/episodios/${key}/${temporada}/${episodio}.json`,
       episodeData
     );
     return true;
@@ -79,16 +95,16 @@ async function guardarEpisodio(tmdbId, temporada, episodio, data) {
 }
 
 // ===== LECTURA =====
-async function leerPelicula(tmdbId) {
+async function leerPelicula(key) {
   try {
-    const { data } = await axios.get(`${FIREBASE_URL}/peliculas/${tmdbId}.json`);
+    const { data } = await axios.get(`${FIREBASE_URL}/peliculas/${key}.json`);
     return data;
   } catch (e) { return null; }
 }
 
-async function leerSerie(tmdbId) {
+async function leerSerie(key) {
   try {
-    const { data } = await axios.get(`${FIREBASE_URL}/series/${tmdbId}.json`);
+    const { data } = await axios.get(`${FIREBASE_URL}/series/${key}.json`);
     return data;
   } catch (e) { return null; }
 }
